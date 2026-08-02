@@ -43,9 +43,12 @@ canary says about itself.
 
 ## What's new
 
-### 2.1 (unreleased)
+### 2.1
 
-- Added the **lite build** for anyone not running WDAC.
+- Added the **lite build** for anyone not running WDAC: no WMI, no service manager, nothing
+  that can fail for its own reasons. Answers only "was I blocked?"
+- Both shipped deny policies now cover **both** binaries.
+- Releases publish, hash, and hash-pin both builds.
 
 ### 2.0
 
