@@ -18,7 +18,7 @@ jobs:
     runs-on: windows-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Add MSBuild to PATH
         uses: microsoft/setup-msbuild@v2
@@ -44,7 +44,11 @@ jobs:
           }
 
       - name: Compute hashes and generate pinned policies
-        shell: pwsh
+        # Windows PowerShell, not pwsh, on purpose. The AppLocker and ConfigCI modules are
+        # Desktop-edition only; under pwsh they load through the WinPS compatibility session,
+        # which hands back Deserialized.* objects that will not bind to the strongly-typed
+        # -FileInformation and -Rules parameters. Everything silently degrades to "skipped".
+        shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
           New-Item -ItemType Directory -Force -Path dist | Out-Null
@@ -57,12 +61,10 @@ jobs:
           # AppLocker and WDAC hash rules use the Authenticode PE hash, not the flat file
           # hash. They differ, and pasting the flat hash into a hash rule produces a rule
           # that matches nothing. Publish both, clearly labelled.
-          $authenticode = $null
-          try {
-            $authenticode = (Get-AppLockerFileInformation -Path $exe).Hash.HashDataString
-          } catch {
-            Write-Warning "Could not compute Authenticode hash: $_"
-          }
+          #
+          # Deliberately not wrapped in try/catch: these hashes are the deliverable, and a
+          # release that quietly ships "unavailable" is worse than one that fails to build.
+          $authenticode = (Get-AppLockerFileInformation -Path $exe).Hash.HashDataString
 
           $lines = @(
             "App Control Canary - ${{ github.ref_name }}"
@@ -70,7 +72,7 @@ jobs:
             ""
             "File            : AppControl_Canary_File.exe"
             "SHA256 (flat)   : $flat"
-            "SHA256 (Authenticode, for hash rules) : $(if ($authenticode) { $authenticode } else { 'unavailable' })"
+            "SHA256 (Authenticode, for hash rules) : $authenticode"
             ""
             "Use the flat hash to verify your download."
             "Use the Authenticode hash in WDAC/AppLocker hash rules."
@@ -83,26 +85,34 @@ jobs:
 
           # Hash-pinned AppLocker rule. New-AppLockerPolicy only emits Allow rules, so the
           # action is flipped afterwards; there is no cmdlet switch for deny.
-          try {
-            $info = Get-AppLockerFileInformation -Path $exe
-            $xml = New-AppLockerPolicy -FileInformation $info -RuleType Hash -User Everyone -Xml
-            $xml.Replace('Action="Allow"', 'Action="Deny"') |
-              Set-Content dist\Deny-Canary.pinned.applocker.xml -Encoding utf8
-          } catch {
-            Write-Warning "Skipped pinned AppLocker policy: $_"
-          }
+          $info = Get-AppLockerFileInformation -Path $exe
+          $xml = New-AppLockerPolicy -FileInformation $info -RuleType Hash -User Everyone -Xml
+          $xml.Replace('Action="Allow"', 'Action="Deny"') |
+            Set-Content dist\Deny-Canary.pinned.applocker.xml -Encoding utf8
 
-          # Hash-pinned WDAC rule. ConfigCI is not present on every runner image, so this
-          # is best-effort; the name-based policy above is always published.
-          try {
-            Import-Module ConfigCI -ErrorAction Stop
-            $rules = New-CIPolicyRule -DriverFilePath $exe -Level Hash -Deny
-            New-CIPolicy -FilePath dist\Deny-Canary.pinned.wdac.xml -Rules $rules -UserPEs
-          } catch {
-            Write-Warning "Skipped pinned WDAC policy: $_"
-          }
+          # Hash-pinned WDAC rule.
+          Import-Module ConfigCI -ErrorAction Stop
+          $rules = New-CIPolicyRule -DriverFilePath $exe -Level Hash -Deny
+          New-CIPolicy -FilePath dist\Deny-Canary.pinned.wdac.xml -Rules $rules -UserPEs
 
           Copy-Item tools\Test-CanaryPaths.ps1 dist\
+
+          # Assert the full asset set before anything gets published. The previous release
+          # succeeded while silently omitting half of it.
+          $required = @(
+            'AppControl_Canary_File.exe'
+            'HASHES.txt'
+            'Deny-Canary.wdac.xml'
+            'Deny-Canary.applocker.xml'
+            'Deny-Canary.pinned.wdac.xml'
+            'Deny-Canary.pinned.applocker.xml'
+            'Test-CanaryPaths.ps1'
+          )
+          $missing = $required | Where-Object { -not (Test-Path "dist\$_") }
+          if ($missing) {
+            throw "Release assets missing: $($missing -join ', ')"
+          }
+
           Get-ChildItem dist | Format-Table Name, Length
 
       - name: Publish release
