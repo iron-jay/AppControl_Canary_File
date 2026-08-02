@@ -1,0 +1,115 @@
+name: Release
+
+# The point of this workflow is that the published binary and the published hashes are
+# provably the same thing. Hand-pasted hashes drift the moment someone rebuilds locally,
+# and a canary pinned to a stale hash silently stops being blocked.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Add MSBuild to PATH
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Build
+        run: msbuild AppControl_Canary_File.csproj /t:Rebuild /p:Configuration=Release /v:minimal
+
+      - name: Smoke test
+        shell: pwsh
+        run: |
+          # Exit code 0 means "ran, no enforcement configured", which is the only correct
+          # result on a stock runner. Anything else means the build or the probe is broken.
+          $psi = [System.Diagnostics.ProcessStartInfo]::new()
+          $psi.FileName = 'bin\Release\AppControl_Canary_File.exe'
+          $psi.Arguments = '--quiet'
+          $psi.UseShellExecute = $false
+          $psi.RedirectStandardOutput = $true
+          $p = [System.Diagnostics.Process]::Start($psi)
+          $p.StandardOutput.ReadToEnd() | Write-Host
+          $p.WaitForExit()
+          if ($p.ExitCode -ne 0) {
+            throw "Canary exited with $($p.ExitCode); expected 0 on an unmanaged runner."
+          }
+
+      - name: Compute hashes and generate pinned policies
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+
+          $exe = (Resolve-Path 'bin\Release\AppControl_Canary_File.exe').Path
+          Copy-Item $exe dist\
+
+          $flat = (Get-FileHash -Path $exe -Algorithm SHA256).Hash
+
+          # AppLocker and WDAC hash rules use the Authenticode PE hash, not the flat file
+          # hash. They differ, and pasting the flat hash into a hash rule produces a rule
+          # that matches nothing. Publish both, clearly labelled.
+          $authenticode = $null
+          try {
+            $authenticode = (Get-AppLockerFileInformation -Path $exe).Hash.HashDataString
+          } catch {
+            Write-Warning "Could not compute Authenticode hash: $_"
+          }
+
+          $lines = @(
+            "App Control Canary - ${{ github.ref_name }}"
+            "Built from ${{ github.sha }}"
+            ""
+            "File            : AppControl_Canary_File.exe"
+            "SHA256 (flat)   : $flat"
+            "SHA256 (Authenticode, for hash rules) : $(if ($authenticode) { $authenticode } else { 'unavailable' })"
+            ""
+            "Use the flat hash to verify your download."
+            "Use the Authenticode hash in WDAC/AppLocker hash rules."
+          )
+          $lines | Set-Content dist\HASHES.txt -Encoding utf8
+
+          # Name-based rules, which survive rebuilds. These are the recommended ones.
+          Copy-Item policy\Deny-Canary.wdac.xml      dist\
+          Copy-Item policy\Deny-Canary.applocker.xml dist\
+
+          # Hash-pinned AppLocker rule. New-AppLockerPolicy only emits Allow rules, so the
+          # action is flipped afterwards; there is no cmdlet switch for deny.
+          try {
+            $info = Get-AppLockerFileInformation -Path $exe
+            $xml = New-AppLockerPolicy -FileInformation $info -RuleType Hash -User Everyone -Xml
+            $xml.Replace('Action="Allow"', 'Action="Deny"') |
+              Set-Content dist\Deny-Canary.pinned.applocker.xml -Encoding utf8
+          } catch {
+            Write-Warning "Skipped pinned AppLocker policy: $_"
+          }
+
+          # Hash-pinned WDAC rule. ConfigCI is not present on every runner image, so this
+          # is best-effort; the name-based policy above is always published.
+          try {
+            Import-Module ConfigCI -ErrorAction Stop
+            $rules = New-CIPolicyRule -DriverFilePath $exe -Level Hash -Deny
+            New-CIPolicy -FilePath dist\Deny-Canary.pinned.wdac.xml -Rules $rules -UserPEs
+          } catch {
+            Write-Warning "Skipped pinned WDAC policy: $_"
+          }
+
+          Copy-Item tools\Test-CanaryPaths.ps1 dist\
+          Get-ChildItem dist | Format-Table Name, Length
+
+      - name: Publish release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" (Get-ChildItem dist | ForEach-Object FullName) `
+            --title "App Control Canary ${{ github.ref_name }}" `
+            --notes-file dist\HASHES.txt

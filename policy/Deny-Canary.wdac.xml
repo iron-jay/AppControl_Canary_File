@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  WDAC deny rule for the App Control canary.
+
+  This rule matches on the PE OriginalFileName, not on a hash, so it survives rebuilds
+  of the canary. That is the point: a hash rule pins one exact binary and silently stops
+  matching the moment you rebuild, which is the most common way people fool themselves
+  into thinking their policy works.
+
+  Hash-pinned variants of this file are attached to each GitHub release for anyone who
+  wants them.
+
+  Merge it into your existing policy:
+
+      Merge-CIPolicy -PolicyPaths .\YourPolicy.xml, .\Deny-Canary.wdac.xml `
+                     -OutputFilePath .\Merged.xml
+      ConvertFrom-CIPolicy -XmlFilePath .\Merged.xml -BinaryFilePath .\Merged.cip
+
+  Deploy Merged.cip, reboot if your policy requires it, then run the canary. If the
+  window still appears, read the banner: it tells you whether you are in audit mode or
+  looking at a real gap.
+-->
+<SiPolicy xmlns="urn:schemas-microsoft-com:sipolicy" PolicyType="Base Policy">
+  <VersionEx>1.0.0.0</VersionEx>
+  <PolicyTypeID>{A244370E-44C9-4C06-B551-F6016E563076}</PolicyTypeID>
+  <PlatformID>{2E07F7E4-194C-4D20-B7C9-6F44A6C5A234}</PlatformID>
+
+  <Rules>
+    <Rule>
+      <Option>Enabled:Unsigned System Integrity Policy</Option>
+    </Rule>
+    <Rule>
+      <Option>Enabled:Advanced Boot Options Menu</Option>
+    </Rule>
+    <!-- Remove this option to move from audit to enforcement. Left in deliberately:
+         merging a deny rule straight into enforcement on a live machine is how people
+         lock themselves out. -->
+    <Rule>
+      <Option>Enabled:Audit Mode</Option>
+    </Rule>
+  </Rules>
+
+  <EKUs />
+
+  <FileRules>
+    <Deny ID="ID_DENY_APPCONTROL_CANARY"
+          FriendlyName="App Control Canary (deny by original file name)"
+          FileName="AppControl_Canary_File.exe" />
+  </FileRules>
+
+  <Signers />
+
+  <SigningScenarios>
+    <SigningScenario Value="12" ID="ID_SIGNINGSCENARIO_WINDOWS" FriendlyName="User mode">
+      <ProductSigners>
+        <FileRulesRef>
+          <FileRuleRef RuleID="ID_DENY_APPCONTROL_CANARY" />
+        </FileRulesRef>
+      </ProductSigners>
+    </SigningScenario>
+  </SigningScenarios>
+
+  <UpdatePolicySigners />
+  <CiSigners />
+  <HvciOptions>0</HvciOptions>
+  <BasePolicyID>{9B1D2C4E-6A73-4F58-8E21-3C5A7D0F1B94}</BasePolicyID>
+  <PolicyID>{9B1D2C4E-6A73-4F58-8E21-3C5A7D0F1B94}</PolicyID>
+</SiPolicy>

@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  AppLocker deny rule for the App Control canary.
+
+  Uses a path rule with a leading wildcard so it matches the canary wherever you drop it,
+  which is what makes it useful for probing writable-but-allowed directories. Deny rules
+  win over allow rules in AppLocker, so this overrides a broad allow on, say, C:\Windows.
+
+  Import it:
+
+      Set-AppLockerPolicy -XmlPolicy .\Deny-Canary.applocker.xml -Merge
+
+  AppLocker rules do nothing unless the Application Identity service is running:
+
+      sc.exe config AppIDSvc start= auto
+      sc.exe start AppIDSvc
+
+  The canary reports AppIDSvc state for exactly this reason - an inert rule set looks
+  identical to no rule set until you check.
+
+  EnforcementMode below is "AuditOnly" on purpose. Switch it to "Enabled" when you have
+  confirmed the rule matches in the Microsoft-Windows-AppLocker/EXE and DLL log.
+-->
+<AppLockerPolicy Version="1">
+  <RuleCollection Type="Exe" EnforcementMode="AuditOnly">
+
+    <FilePathRule Id="b7f3a1c2-5d84-4e19-9a06-2f8c3d5e7b41"
+                  Name="Deny App Control Canary (any location)"
+                  Description="Canary binary used to verify that App Control is actually blocking."
+                  UserOrGroupSid="S-1-1-0"
+                  Action="Deny">
+      <Conditions>
+        <FilePathCondition Path="*\AppControl_Canary_File.exe" />
+      </Conditions>
+    </FilePathRule>
+
+  </RuleCollection>
+</AppLockerPolicy>
