@@ -24,24 +24,33 @@ jobs:
         uses: microsoft/setup-msbuild@v2
 
       - name: Build
-        run: msbuild AppControl_Canary_File.csproj /t:Rebuild /p:Configuration=Release /v:minimal
+        run: |
+          msbuild AppControl_Canary_File.csproj /t:Rebuild /p:Configuration=Release /v:minimal
+          msbuild Lite\AppControl_Canary_Lite.csproj /t:Rebuild /p:Configuration=Release /v:minimal
 
       - name: Smoke test
         shell: pwsh
         run: |
-          # Exit code 0 means "ran, no enforcement configured", which is the only correct
-          # result on a stock runner. Anything else means the build or the probe is broken.
-          $psi = [System.Diagnostics.ProcessStartInfo]::new()
-          $psi.FileName = 'bin\Release\AppControl_Canary_File.exe'
-          $psi.Arguments = '--quiet'
-          $psi.UseShellExecute = $false
-          $psi.RedirectStandardOutput = $true
-          $p = [System.Diagnostics.Process]::Start($psi)
-          $p.StandardOutput.ReadToEnd() | Write-Host
-          $p.WaitForExit()
-          if ($p.ExitCode -ne 0) {
-            throw "Canary exited with $($p.ExitCode); expected 0 on an unmanaged runner."
+          # On a stock runner the full build must report 0 ("ran, no enforcement configured")
+          # and the lite build must report 5 ("ran, nothing checked"). Anything else means the
+          # build or the probe is broken.
+          function Invoke-Canary($path) {
+            $psi = [System.Diagnostics.ProcessStartInfo]::new()
+            $psi.FileName = $path
+            $psi.Arguments = '--quiet'
+            $psi.UseShellExecute = $false
+            $psi.RedirectStandardOutput = $true
+            $p = [System.Diagnostics.Process]::Start($psi)
+            $p.StandardOutput.ReadToEnd() | Write-Host
+            $p.WaitForExit()
+            return $p.ExitCode
           }
+
+          $full = Invoke-Canary 'bin\Release\AppControl_Canary_File.exe'
+          if ($full -ne 0) { throw "Full build exited with $full; expected 0." }
+
+          $lite = Invoke-Canary 'Lite\bin\Release\AppControl_Canary_Lite.exe'
+          if ($lite -ne 5) { throw "Lite build exited with $lite; expected 5." }
 
       - name: Compute hashes and generate pinned policies
         # Windows PowerShell, not pwsh, on purpose. The AppLocker and ConfigCI modules are
@@ -53,10 +62,10 @@ jobs:
           $ErrorActionPreference = 'Stop'
           New-Item -ItemType Directory -Force -Path dist | Out-Null
 
-          $exe = (Resolve-Path 'bin\Release\AppControl_Canary_File.exe').Path
-          Copy-Item $exe dist\
-
-          $flat = (Get-FileHash -Path $exe -Algorithm SHA256).Hash
+          $exe  = (Resolve-Path 'bin\Release\AppControl_Canary_File.exe').Path
+          $lite = (Resolve-Path 'Lite\bin\Release\AppControl_Canary_Lite.exe').Path
+          Copy-Item $exe  dist\
+          Copy-Item $lite dist\
 
           # AppLocker and WDAC hash rules use the Authenticode PE hash, not the flat file
           # hash. They differ, and pasting the flat hash into a hash rule produces a rule
@@ -64,35 +73,41 @@ jobs:
           #
           # Deliberately not wrapped in try/catch: these hashes are the deliverable, and a
           # release that quietly ships "unavailable" is worse than one that fails to build.
-          $authenticode = (Get-AppLockerFileInformation -Path $exe).Hash.HashDataString
-
           $lines = @(
             "App Control Canary - ${{ github.ref_name }}"
             "Built from ${{ github.sha }}"
             ""
-            "File            : AppControl_Canary_File.exe"
-            "SHA256 (flat)   : $flat"
-            "SHA256 (Authenticode, for hash rules) : $authenticode"
-            ""
             "Use the flat hash to verify your download."
-            "Use the Authenticode hash in WDAC/AppLocker hash rules."
+            "Use the Authenticode hash in WDAC/AppLocker hash rules. They are not the same value."
           )
+
+          foreach ($binary in @($exe, $lite)) {
+            $lines += @(
+              ""
+              "File            : $([System.IO.Path]::GetFileName($binary))"
+              "SHA256 (flat)   : $((Get-FileHash -Path $binary -Algorithm SHA256).Hash)"
+              "SHA256 (Authent): $((Get-AppLockerFileInformation -Path $binary).Hash.HashDataString)"
+            )
+          }
+
           $lines | Set-Content dist\HASHES.txt -Encoding utf8
 
           # Name-based rules, which survive rebuilds. These are the recommended ones.
           Copy-Item policy\Deny-Canary.wdac.xml      dist\
           Copy-Item policy\Deny-Canary.applocker.xml dist\
 
-          # Hash-pinned AppLocker rule. New-AppLockerPolicy only emits Allow rules, so the
-          # action is flipped afterwards; there is no cmdlet switch for deny.
-          $info = Get-AppLockerFileInformation -Path $exe
+          # Hash-pinned AppLocker rule, covering both binaries. New-AppLockerPolicy only emits
+          # Allow rules, so the action is flipped afterwards; there is no cmdlet switch for deny.
+          $info = Get-AppLockerFileInformation -Path $exe, $lite
           $xml = New-AppLockerPolicy -FileInformation $info -RuleType Hash -User Everyone -Xml
           $xml.Replace('Action="Allow"', 'Action="Deny"') |
             Set-Content dist\Deny-Canary.pinned.applocker.xml -Encoding utf8
 
-          # Hash-pinned WDAC rule.
+          # Hash-pinned WDAC rule. New-CIPolicyRule takes one file at a time, so the rule sets
+          # are concatenated before building the policy.
           Import-Module ConfigCI -ErrorAction Stop
-          $rules = New-CIPolicyRule -DriverFilePath $exe -Level Hash -Deny
+          $rules  = New-CIPolicyRule -DriverFilePath $exe  -Level Hash -Deny
+          $rules += New-CIPolicyRule -DriverFilePath $lite -Level Hash -Deny
           New-CIPolicy -FilePath dist\Deny-Canary.pinned.wdac.xml -Rules $rules -UserPEs
 
           Copy-Item tools\Test-CanaryPaths.ps1 dist\
@@ -101,6 +116,7 @@ jobs:
           # succeeded while silently omitting half of it.
           $required = @(
             'AppControl_Canary_File.exe'
+            'AppControl_Canary_Lite.exe'
             'HASHES.txt'
             'Deny-Canary.wdac.xml'
             'Deny-Canary.applocker.xml'

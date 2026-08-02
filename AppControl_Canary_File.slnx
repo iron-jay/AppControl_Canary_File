@@ -1,3 +1,4 @@
 <Solution>
   <Project Path="AppControl_Canary_File.csproj" Id="810bb18f-085a-4495-a94d-8c1c3a47da2e" />
+  <Project Path="Lite/AppControl_Canary_Lite.csproj" Id="3f6c9a41-77d2-4b18-9e05-8c2a6d14f7b3" />
 </Solution>

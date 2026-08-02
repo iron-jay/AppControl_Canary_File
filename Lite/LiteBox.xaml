@@ -1,0 +1,54 @@
+<Window x:Class="AppControl_Canary_Lite.LiteBox"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Width="500"
+        Title="App Control Canary (Lite)"
+        WindowStyle="None"
+        ResizeMode="NoResize"
+        SizeToContent="Height"
+        WindowStartupLocation="CenterScreen"
+        Topmost="True">
+    <Grid Background="DarkGray">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <Label Grid.Row="0"
+               Content="She's Dead, Jim"
+               Background="DarkSlateBlue"
+               Foreground="White"
+               FontSize="12"
+               FontStyle="Italic"
+               HorizontalContentAlignment="Left"
+               MouseLeftButtonDown="TitleBar_MouseLeftButtonDown"/>
+
+        <StackPanel Grid.Row="1" Margin="10,10,10,0">
+            <TextBlock Text="If you can read this, execution wasn't blocked."
+                       FontSize="18" FontWeight="Thin" TextWrapping="Wrap"/>
+            <TextBlock Text="Or you've allowed this app, which defeats the purpose of having it..."
+                       FontSize="13" FontWeight="Thin" TextWrapping="Wrap" Margin="0,10,0,0"/>
+        </StackPanel>
+
+        <Border Grid.Row="2" Background="#33000000" Margin="10,12,10,0" Padding="8,6">
+            <TextBlock x:Name="DetailText"
+                       FontSize="11" FontFamily="Consolas" TextWrapping="Wrap"/>
+        </Border>
+
+        <StackPanel Grid.Row="3" Orientation="Horizontal"
+                    HorizontalAlignment="Right" Margin="0,12,10,10">
+            <Button x:Name="CopyButton"
+                    Content="Copy details"
+                    FontSize="12" FontWeight="Thin"
+                    Height="24" Width="90" Margin="0,0,8,0"
+                    Click="Copy_Click"/>
+            <Button Content="I'll go and fix it"
+                    FontSize="12" FontWeight="Thin"
+                    Height="24" Width="90"
+                    IsDefault="True" IsCancel="True"
+                    Click="Dismiss_Click"/>
+        </StackPanel>
+    </Grid>
+</Window>

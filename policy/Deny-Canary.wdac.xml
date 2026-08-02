@@ -46,6 +46,9 @@
     <Deny ID="ID_DENY_APPCONTROL_CANARY"
           FriendlyName="App Control Canary (deny by original file name)"
           FileName="AppControl_Canary_File.exe" />
+    <Deny ID="ID_DENY_APPCONTROL_CANARY_LITE"
+          FriendlyName="App Control Canary, lite build (deny by original file name)"
+          FileName="AppControl_Canary_Lite.exe" />
   </FileRules>
 
   <Signers />
@@ -55,6 +58,7 @@
       <ProductSigners>
         <FileRulesRef>
           <FileRuleRef RuleID="ID_DENY_APPCONTROL_CANARY" />
+          <FileRuleRef RuleID="ID_DENY_APPCONTROL_CANARY_LITE" />
         </FileRulesRef>
       </ProductSigners>
     </SigningScenario>

@@ -6,16 +6,48 @@ Ideally, you would not be able to open it (add it to a block list or something).
 If it opens, it now tells you **why** it was allowed to run, which is usually the part you
 actually wanted to know.
 
+## Which build do I want?
+
+Two binaries ship. They look and behave the same; the difference is how much they try to
+explain.
+
+| | `AppControl_Canary_File.exe` (full) | `AppControl_Canary_Lite.exe` (lite) |
+|---|---|---|
+| Answers | *Why* was I allowed to run? | *Was* I blocked? |
+| Reads WDAC / SAC / AppLocker state | Yes | No |
+| Shows path, hash, signature | Yes | Yes |
+| Needs WMI and the service manager | Yes | **No** |
+| Exit code when it runs | 0 / 10 / 20 / 30 by policy state | Always 5 |
+
+**Use lite if you're not running WDAC.** Its whole point is the absence: no WMI query, no
+service control manager call, nothing that can hang or throw for reasons of its own. A canary
+that fails on its own account is worse than no canary, because you can't tell that apart from
+a policy block. Lite has almost nothing left to go wrong.
+
+Use the full build when you *are* running WDAC and want the verdict — especially the audit-mode
+answer, which is the usual reason a canary runs when you expected a block.
+
+Either binary works with [`tools/Test-CanaryPaths.ps1`](tools/Test-CanaryPaths.ps1), which
+decides whether a location is blocked from the launch failure rather than from anything the
+canary says about itself.
+
 ## Quick start
 
-1. Grab `AppControl_Canary_File.exe` from the [latest release](../../releases/latest), or
-   build it yourself (see below).
-2. Add a deny rule from [`policy/`](policy/) to your policy, in audit mode first.
+1. Grab a binary from the [latest release](../../releases/latest), or build it yourself
+   (see below).
+2. Add a deny rule from [`policy/`](policy/) to your policy, in audit mode first. The shipped
+   rules cover both binaries.
 3. Run the canary.
-4. Read the banner. Blocked entirely is the goal; if it opens, the verdict tells you whether
-   you're in audit mode or looking at a real gap.
+4. Not opening at all is the goal. If it opens: the full build's banner tells you whether
+   you're in audit mode or looking at a real gap; lite just tells you it wasn't blocked.
 
-## What's new in 2.0
+## What's new
+
+### 2.1 (unreleased)
+
+- Added the **lite build** for anyone not running WDAC.
+
+### 2.0
 
 - The window now shows **WDAC, Smart App Control, and AppLocker enforcement state**, plus the
   canary's own path, hash, and signature — so "it opened" becomes "it opened *because*".
@@ -27,7 +59,7 @@ actually wanted to know.
 - Fixed: `Environment.OSVersion` reported `6.2.9200` on Windows 11 (missing app manifest);
   the window opened top-left and behind other windows; Esc didn't close it.
 
-## What it reports
+## What the full build reports
 
 Launching the canary shows a window with a colour-coded verdict and the details behind it:
 
@@ -64,6 +96,14 @@ Exit codes — remember that the canary running at all means nothing blocked it:
 | 20 | Ran; policy is **enforcing and failed to block it**. Real gap |
 | 30 | Ran; policy state unreadable. Retry as administrator |
 | 1 | Diagnostics failed |
+| 5 | Ran; **lite build**, so no policy state was checked at all |
+
+Code 5 is deliberately distinct from 0 so "nothing is configured" can never be confused with
+"nothing was looked at".
+
+A block never produces an exit code at all — the *launch* fails, surfacing as Win32 error
+1260 (`ERROR_ACCESS_DISABLED_BY_POLICY`) in whatever tried to start it. That's the signal the
+probe script watches for.
 
 ## Testing folder permissiveness
 
@@ -124,6 +164,13 @@ Open the solution in Visual Studio, or:
 ```bash
 msbuild AppControl_Canary_File.csproj /t:Rebuild /p:Configuration=Release
 ```
+
+```bash
+msbuild Lite\AppControl_Canary_Lite.csproj /t:Rebuild /p:Configuration=Release
+```
+
+Both projects are in the solution. They share `canary.ico` and `app.manifest` rather than
+keeping copies, so the manifest fixes can't drift apart.
 
 Targets .NET Framework 4.7.2 deliberately. It's present on every Windows 10/11 machine with
 no prerequisites — a tool whose failure mode is "didn't launch" shouldn't add a runtime

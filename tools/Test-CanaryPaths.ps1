@@ -16,8 +16,10 @@
     run elevated if you want the fullest report.
 
 .PARAMETER CanaryPath
-    Path to AppControl_Canary_File.exe. Defaults to the build output or a copy sitting
-    beside this script.
+    Path to AppControl_Canary_File.exe or AppControl_Canary_Lite.exe. Defaults to whichever
+    build output it finds, or a copy sitting beside this script. Either binary works: this
+    script decides whether a location is blocked from the launch failure, not from anything
+    the canary reports about itself.
 
 .PARAMETER Path
     Override the default directory list.
@@ -61,11 +63,16 @@ function Resolve-Canary {
         return (Resolve-Path -LiteralPath $Explicit).Path
     }
 
+    # The lite build works here too - the script classifies by launch failure, not by what
+    # the canary reports about itself - so fall back to it if the full build is absent.
     $root = Split-Path -Parent $PSScriptRoot
     $candidates = @(
         (Join-Path $PSScriptRoot 'AppControl_Canary_File.exe')
         (Join-Path $root 'bin\Release\AppControl_Canary_File.exe')
         (Join-Path $root 'bin\Debug\AppControl_Canary_File.exe')
+        (Join-Path $PSScriptRoot 'AppControl_Canary_Lite.exe')
+        (Join-Path $root 'Lite\bin\Release\AppControl_Canary_Lite.exe')
+        (Join-Path $root 'Lite\bin\Debug\AppControl_Canary_Lite.exe')
     )
 
     foreach ($candidate in $candidates) {
@@ -176,6 +183,7 @@ function Test-OnePath {
             $result.ExitCode = $run.ExitCode
             $result.Verdict  = switch ($run.ExitCode) {
                 0       { 'No enforcement configured' }
+                5       { 'Ran (lite build - no policy state checked)' }
                 10      { 'Audit mode - would have been blocked' }
                 20      { 'POLICY GAP - enforcing and ran anyway' }
                 30      { 'Enforcement state unreadable (run elevated)' }

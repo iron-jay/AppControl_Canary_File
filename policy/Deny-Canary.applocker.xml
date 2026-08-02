@@ -34,5 +34,15 @@
       </Conditions>
     </FilePathRule>
 
+    <FilePathRule Id="c8a4b2d3-6e95-4f2a-8b17-3a9d4e6f8c52"
+                  Name="Deny App Control Canary, lite build (any location)"
+                  Description="Minimal canary binary. Blocked separately because it is a different file name."
+                  UserOrGroupSid="S-1-1-0"
+                  Action="Deny">
+      <Conditions>
+        <FilePathCondition Path="*\AppControl_Canary_Lite.exe" />
+      </Conditions>
+    </FilePathRule>
+
   </RuleCollection>
 </AppLockerPolicy>
